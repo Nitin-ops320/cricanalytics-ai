@@ -1,3 +1,4 @@
+
 import streamlit as st
 import cv2
 import mediapipe as mp
@@ -6,47 +7,65 @@ import json
 import google.generativeai as genai
 import os
 
-# 1. Helper function for calculation
+# Safe vector angle calculator (2D Projection)
 def calculate_angle(a, b, c):
     a, b, c = np.array(a), np.array(b), np.array(c)
     ba = a - b
     bc = c - b
-    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
     return int(np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0))))
 
-# Streamlit User Interface Setup
-st.set_page_config(page_title="CricAnalytics AI", layout="wide")
-st.title("🏏 CricAnalytics AI: Biomechanical Coaching Assistant")
-st.markdown("An end-to-end Computer Vision & Generative AI pipeline tracking cricket performance metrics.")
+# Page Layout configuration
+st.set_page_config(page_title="CricAnalytics AI - Pro Engine", layout="wide", initial_sidebar_state="expanded")
+st.title("🏏 CricAnalytics AI: Universal Movement Performance Engine")
+st.markdown("Advanced computer vision and generative biomechanical analysis scaling across all cricket motions.")
 
-# Sidebar Configuration
-st.sidebar.header("🔧 Configuration Panel")
-user_api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
-uploaded_file = st.sidebar.file_uploader("Upload Cricket Session Video", type=['mp4', 'mov', 'avi'])
+# Sidebar System Configuration
+st.sidebar.header("⚙️ Core Configuration")
+user_api_key = st.sidebar.text_input("Gemini API Key", type="password")
+analysis_mode = st.sidebar.selectbox("Select Analysis Discipline", [
+    "Batting Biomechanics & Shot Mechanics",
+    "Bowling Action, Release & Stride Dynamics",
+    "Fielding, Catching, Throwing & Agility"
+])
+uploaded_file = st.sidebar.file_uploader("Upload Session Video Clip", type=['mp4', 'mov', 'avi', 'mkv'])
 
 if uploaded_file and user_api_key:
-    # Configure GenAI
     genai.configure(api_key=user_api_key)
     
-    # Save uploaded video to local temp file
+    # Clean staging setup for processing
     input_path = "temp_input.mp4"
     output_path = "telemetry_output.mp4"
     with open(input_path, "wb") as f:
         f.write(uploaded_file.read())
         
-    if st.sidebar.button("🚀 Run Biomechanical Pipeline"):
-        # Setup Video Stream & MediaPipe
+    if st.sidebar.button("🚀 Execute Biomechanical Pipeline"):
         cap = cv2.VideoCapture(input_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
-        width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # Guard against zero/broken video values
+        if total_frames <= 0 or fps <= 0:
+            st.error("❌ Invalid or corrupted video file format. Try uploading a different clip.")
+            st.stop()
+            
         out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
         
+        # Init Tracking Architecture
         mp_pose = mp.solutions.pose
-        pose = mp_pose.Pose(static_image_mode=False, model_complexity=1)
+        pose = mp_pose.Pose(static_image_mode=False, model_complexity=1, min_detection_confidence=0.5, min_tracking_confidence=0.5)
         mp_drawing = mp.solutions.drawing_utils
         
-        elbow_angles, knee_angles = [], []
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        # Full-body universal telemetry arrays
+        telemetry_data = {
+            "left_elbow": [], "right_elbow": [],
+            "left_shoulder": [], "right_shoulder": [],
+            "left_knee": [], "right_knee": [],
+            "left_hip": [], "right_hip": [],
+            "center_mass_displacement": [] # Tracking global movement velocity
+        }
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -63,92 +82,129 @@ if uploaded_file and user_api_key:
             if results.pose_landmarks:
                 landmarks = results.pose_landmarks.landmark
                 
-                # Extract Left side landmarks
-                l_shoulder = [landmarks[11].x, landmarks[11].y]
-                l_elbow    = [landmarks[13].x, landmarks[13].y]
-                l_wrist    = [landmarks[15].x, landmarks[15].y]
-                l_hip      = [landmarks[23].x, landmarks[23].y]
-                l_knee     = [landmarks[25].x, landmarks[25].y]
-                l_ankle    = [landmarks[27].x, landmarks[27].y]
+                # Extract positional mappings
+                def get_pt(idx): return [landmarks[idx].x, landmarks[idx].y]
                 
-                # Process Angles
-                e_angle = calculate_angle(l_shoulder, l_elbow, l_wrist)
-                k_angle = calculate_angle(l_hip, l_knee, l_ankle)
-                elbow_angles.append(e_angle)
-                knee_angles.append(k_angle)
+                # Joint extraction mappings (MediaPipe indices)
+                p = {
+                    "ls": get_pt(11), "le": get_pt(13), "lw": get_pt(15),
+                    "rs": get_pt(12), "re": get_pt(14), "rw": get_pt(16),
+                    "lh": get_pt(23), "lk": get_pt(25), "la": get_pt(27),
+                    "rh": get_pt(24), "rk": get_pt(26), "ra": get_pt(28)
+                }
                 
-                # Overlays
+                # Calculate all structural kinematics
+                ang = {
+                    "le": calculate_angle(p["ls"], p["le"], p["lw"]),
+                    "re": calculate_angle(p["rs"], p["re"], p["rw"]),
+                    "ls": calculate_angle(p["lh"], p["ls"], p["le"]),
+                    "rs": calculate_angle(p["rh"], p["rs"], p["re"]),
+                    "lk": calculate_angle(p["lh"], p["lk"], p["la"]),
+                    "rk": calculate_angle(p["rh"], p["rk"], p["ra"]),
+                    "lh": calculate_angle(p["ls"], p["lh"], p["lk"]),
+                    "rh": calculate_angle(p["rs"], p["rh"], p["rk"])
+                }
+                
+                # Append to datasets
+                telemetry_data["left_elbow"].append(ang["le"])
+                telemetry_data["right_elbow"].append(ang["re"])
+                telemetry_data["left_shoulder"].append(ang["ls"])
+                telemetry_data["right_shoulder"].append(ang["rs"])
+                telemetry_data["left_knee"].append(ang["lk"])
+                telemetry_data["right_knee"].append(ang["rk"])
+                telemetry_data["left_hip"].append(ang["lh"])
+                telemetry_data["right_hip"].append(ang["rh"])
+                
+                # Track position of midpoint hip to compute translational velocity vectors
+                mid_hip_x = (p["lh"][0] + p["rh"][0]) / 2.0
+                telemetry_data["center_mass_displacement"].append(float(mid_hip_x))
+                
+                # Render complete overlay graphics
                 mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-                cv2.putText(frame, f"{e_angle} Deg", (int(l_elbow[0]*width)+15, int(l_elbow[1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
-                cv2.putText(frame, f"{k_angle} Deg", (int(l_knee[0]*width)+15, int(l_knee[1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-          
+                
+                # Draw minimal key contextual telemetry text onto screen graphics
+                cv2.putText(frame, f"L_Elbow: {ang['le']}deg", (int(p['le'][0]*width)+10, int(p['le'][1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1)
+                cv2.putText(frame, f"R_Elbow: {ang['re']}deg", (int(p['re'][0]*width)+10, int(p['re'][1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1)
+                cv2.putText(frame, f"L_Knee: {ang['lk']}deg", (int(p['lk'][0]*width)+10, int(p['lk'][1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,255,255), 1)
+                cv2.putText(frame, f"R_Knee: {ang['rk']}deg", (int(p['rk'][0]*width)+10, int(p['rk'][1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,255,255), 1)
+
             out.write(frame)
             progress_bar.progress(int((frame_idx / total_frames) * 100))
-            status_text.text(f"Processing frame {frame_idx}/{total_frames}...")
+            status_text.text(f"Processing motion telemetry frame {frame_idx}/{total_frames}...")
 
         cap.release()
         out.release()
         pose.close()
         
-        # Build Summary JSON
-        cap.release()
-        out.release()
-        pose.close()
-        
-        # FIX: Check if we actually collected any data before running min()
-        if not elbow_angles or not knee_angles:
+        # Robust evaluation check to completely prevent ValueError on empty datasets
+        if not telemetry_data["left_elbow"]:
             status_text.empty()
             progress_bar.empty()
-            st.error("❌ **Biomechanical Tracking Failed:** MediaPipe could not detect a distinct human pose in this video. Please ensure the player's full body is visible, well-lit, and facing the camera sidebar profile.")
+            st.error("❌ **Kinematic Tracking Error:** The software could not reliably isolate human skeletal metrics from this video. Ensure background clarity and clear full-body visibility.")
         else:
-            # Build Summary JSON safely now that lists are verified
-            coaching_flags = []
-            min_elbow, min_knee = min(elbow_angles), min(knee_angles)
+            status_text.text("🤖 Constructing Unified Kinematic Payload...")
             
-            if min_elbow < 110: 
-                coaching_flags.append("Collapsed Front Elbow: Loss of control/power.")
-            else: 
-                coaching_flags.append("Good High Elbow stable position.")
+            # Formulate structured summary dataset metrics mapping max, min, ranges
+            def compile_stats(arr):
+                return {"min": int(np.min(arr)), "max": int(np.max(arr)), "range": int(np.max(arr) - np.min(arr))}
                 
-            if min_knee > 145: 
-                coaching_flags.append("Stiff Front Leg: Insufficient weight transfer.")
-            else: 
-                coaching_flags.append("Solid Front-Foot Stride.")
-            
-            session_json = {
-                "metrics_summary": {"elbow_min": min_elbow, "knee_min": min_knee},
-                "technical_coaching_insights": coaching_flags
+            packaged_payload = {
+                "discipline_context": analysis_mode,
+                "kinematic_metrics": {
+                    "upper_body_joints": {
+                        "left_elbow": compile_stats(telemetry_data["left_elbow"]),
+                        "right_elbow": compile_stats(telemetry_data["right_elbow"]),
+                        "left_shoulder": compile_stats(telemetry_data["left_shoulder"]),
+                        "right_shoulder": compile_stats(telemetry_data["right_shoulder"])
+                    },
+                    "lower_body_joints": {
+                        "left_knee": compile_stats(telemetry_data["left_knee"]),
+                        "right_knee": compile_stats(telemetry_data["right_knee"]),
+                        "left_hip": compile_stats(telemetry_data["left_hip"]),
+                        "right_hip": compile_stats(telemetry_data["right_hip"])
+                    }
+                },
+                "locomotive_dynamics": {
+                    "total_frames_processed": frame_idx,
+                    "horizontal_displacement_range": float(np.max(telemetry_data["center_mass_displacement"]) - np.min(telemetry_data["center_mass_displacement"]))
+                }
             }
             
-            # Generate LLM Feedback
-            status_text.text("🤖 Generating Professional AI Coaching Analysis...")
-            prompt = f"You are an elite cricket coach. Review this tracking data and write an action-oriented coaching report with 1 technical breakdown and 1 specific drill:\n{json.dumps(session_json)}"
-            model = genai.GenerativeModel('gemini-3.5-flash')
-            response = model.generate_content(prompt)
+            # Orchestrate specialized targeted system prompt logic based on disciplinary track
+            system_instruction = f"""
+            You are a world-class high-performance cricket sports scientist and national team bio-mechanics coach. 
+            You are analyzing the kinematic tracking output of a movement sequence categorized under the discipline: "{analysis_mode}".
+
+            Review the raw physical data metrics compiled below:
+            {json.dumps(packaged_payload, indent=2)}
+
+            Provide a comprehensive, elite coaching report. Your analysis must adapt to whatever action is in the video based on the data:
+            1. If it's batting, interpret what the data indicates about their posture, backlift, stance, or extension.
+            2. If it's bowling, evaluate what the joint ranges mean for their loading, alignment, and follow-through.
+            3. If it's fielding, interpret what the displacement and flexibility angles suggest about their speed, throwing mechanics, or core agility.
+
+            Structure your report cleanly with sections for: Technical Biomechanical Evaluation, Core Vulnerabilities/Strengths Identified, and 1 Specialized Elite Training Drill. 
+            Maintain professional, actionable sports terminology. Do not output any markdown code blocks, system strings, or raw script syntax.
+            """
             
-            # Render Results to dashboard splits
-            status_text.text("✅ Analysis Complete!")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("📊 Tracked Telemetry Video")
-                st.video(output_path)
-            with col2:
-                st.subheader("📋 Official AI Coaching Report")
-                st.write(response.text)
-        # Generate LLM Feedback
-        status_text.text("🤖 Generating Professional AI Coaching Analysis...")
-        prompt = f"You are an elite cricket coach. Review this tracking data and write an action-oriented coaching report with 1 technical breakdown and 1 specific drill:\n{json.dumps(session_json)}"
-        model = genai.GenerativeModel('gemini-3.5-flash')
-        response = model.generate_content(prompt)
-        
-        # Render Results to dashboard splits
-        status_text.text("✅ Analysis Complete!")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("📊 Tracked Telemetry Video")
-            st.video(output_path)
-        with col2:
-            st.subheader("📋 Official AI Coaching Report")
-            st.write(response.text)
+            status_text.text("🧠 Deploying Generative Large Language Model Evaluation Layer...")
+            try:
+                model = genai.GenerativeModel('gemini-3.5-flash')
+                response = model.generate_content(system_instruction)
+                
+                status_text.empty()
+                progress_bar.empty()
+                st.success("✅ Analysis Successfully Concluded!")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("📊 CV Overlaid Telemetry Output")
+                    st.video(output_path)
+                with col2:
+                    st.subheader("📋 Professional Biomechanical Analysis")
+                    st.write(response.text)
+                    
+            except Exception as e:
+                st.error(f"❌ Verification Layer Error: Unable to extract data from Gemini API. Details: {e}")
 else:
-    st.info("💡 Please input your Gemini API Key and upload an operational cricket video clip in the sidebar to begin processing.")
+    st.info("💡 Configuration Status: Open the sidebar, insert your Gemini API Key, select your target cricket discipline, and upload your movement video to initialize processing.")
