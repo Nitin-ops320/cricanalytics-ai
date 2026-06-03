@@ -91,7 +91,7 @@ if uploaded_file and user_api_key:
         pose.close()
         
         # Build Summary JSON
-         cap.release()
+        cap.release()
         out.release()
         pose.close()
         
