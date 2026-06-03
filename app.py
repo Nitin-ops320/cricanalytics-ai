@@ -5,7 +5,6 @@ import mediapipe as mp
 import numpy as np
 import json
 import google.generativeai as genai
-import os
 
 # Safe vector angle calculator
 def calculate_angle(a, b, c):
@@ -15,33 +14,26 @@ def calculate_angle(a, b, c):
     cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
     return int(np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0))))
 
-# Streamlit Page Design
-st.set_page_config(page_title="CricAnalytics AI", layout="wide")
-st.title("🏏 CricAnalytics AI: Universal Cricket Analyzer")
-st.markdown("Upload any cricket movement (Batting, Bowling, or Fielding) for an instant biomechanical check.")
+# Page UI Config
+st.set_page_config(page_title="CricAnalytics AI - Simplified", layout="wide")
+st.title("🏏 CricAnalytics AI: Simple Performance Scorecard")
+st.markdown("Instantly identify actions and get clean, simple biomechanical feedback.")
 
-# Sidebar Controls
-st.sidebar.header("📋 Setup Panel")
-user_api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
-analysis_mode = st.sidebar.selectbox("Select Discipline", [
-    "Batting Performance",
-    "Bowling Action",
-    "Fielding & Agility"
-])
-uploaded_file = st.sidebar.file_uploader("Upload Cricket Clip", type=['mp4', 'mov', 'avi', 'mkv'])
+# Sidebar Configuration
+st.sidebar.header("⚙️ Core Setup")
+user_api_key = st.sidebar.text_input("Gemini API Key", type="password")
+analysis_mode = st.sidebar.selectbox("Select Track", ["Batting", "Bowling", "Fielding"])
+uploaded_file = st.sidebar.file_uploader("Upload Cricket Clip", type=['mp4', 'mov', 'avi'])
 
 if uploaded_file and user_api_key:
     genai.configure(api_key=user_api_key)
     
-    # Define file paths
     input_path = "temp_input.mp4"
-    raw_output_path = "raw_output.mp4"
-    final_web_path = "telemetry_output.mp4"
-    
+    output_path = "telemetry_output.mp4"
     with open(input_path, "wb") as f:
         f.write(uploaded_file.read())
         
-    if st.sidebar.button("🚀 Analyze Movement"):
+    if st.sidebar.button("🚀 Run Simple Analysis"):
         cap = cv2.VideoCapture(input_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -49,21 +41,22 @@ if uploaded_file and user_api_key:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
         if total_frames <= 0 or fps <= 0:
-            st.error("❌ Unreadable video file. Please try another clip.")
+            st.error("❌ Broken video file. Please upload another video clip.")
             st.stop()
             
-        # Write to a temporary raw file first
-        out = cv2.VideoWriter(raw_output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+        # FIX: Changed codec to 'avc1' (H.264) so it plays perfectly in HTML5 web browsers instead of showing 0 seconds
+        out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'avc1'), fps, (width, height))
         
+        # Init MediaPipe
         mp_pose = mp.solutions.pose
-        pose = mp_pose.Pose(static_image_mode=False, model_complexity=1)
+        pose = mp_pose.Pose(static_image_mode=False, model_complexity=1, min_detection_confidence=0.5, min_tracking_confidence=0.5)
         mp_drawing = mp.solutions.drawing_utils
         
+        # Telemetry storage
         telemetry_data = {
             "left_elbow": [], "right_elbow": [],
             "left_knee": [], "right_knee": [],
-            "left_hip": [], "right_hip": [],
-            "movement_speed": []
+            "left_hip": [], "right_hip": []
         }
         
         progress_bar = st.progress(0)
@@ -81,115 +74,106 @@ if uploaded_file and user_api_key:
             if results.pose_landmarks:
                 landmarks = results.pose_landmarks.landmark
                 
-                # Get points
-                l_shoulder = [landmarks[11].x, landmarks[11].y]
-                l_elbow    = [landmarks[13].x, landmarks[13].y]
-                l_wrist    = [landmarks[15].x, landmarks[15].y]
-                l_hip      = [landmarks[23].x, landmarks[23].y]
-                l_knee     = [landmarks[25].x, landmarks[25].y]
-                l_ankle    = [landmarks[27].x, landmarks[27].y]
+                # Simple point picker
+                def get_pt(idx): return [landmarks[idx].x, landmarks[idx].y]
                 
-                r_shoulder = [landmarks[12].x, landmarks[12].y]
-                r_elbow    = [landmarks[14].x, landmarks[14].y]
-                r_wrist    = [landmarks[16].x, landmarks[16].y]
-                r_hip      = [landmarks[24].x, landmarks[24].y]
-                r_knee     = [landmarks[26].x, landmarks[26].y]
-                r_ankle    = [landmarks[28].x, landmarks[28].y]
+                # Pull raw coordinates
+                ls, le, lw = get_pt(11), get_pt(13), get_pt(15)
+                rs, re, rw = get_pt(12), get_pt(14), get_pt(16)
+                lh, lk, la = get_pt(23), get_pt(25), get_pt(27)
+                rh, rk, ra = get_pt(24), get_pt(26), get_pt(28)
                 
-                # Calculate angles
-                le = calculate_angle(l_shoulder, l_elbow, l_wrist)
-                re = calculate_angle(r_shoulder, r_elbow, r_wrist)
-                lk = calculate_angle(l_hip, l_knee, l_ankle)
-                rk = calculate_angle(r_hip, r_knee, r_ankle)
-                lh = calculate_angle(l_shoulder, l_hip, l_knee)
-                rh = calculate_angle(r_shoulder, r_hip, r_knee)
+                # Compute angles
+                le_ang = calculate_angle(ls, le, lw)
+                re_ang = calculate_angle(rs, re, rw)
+                lk_ang = calculate_angle(lh, lk, la)
+                rk_ang = calculate_angle(rh, rk, ra)
                 
-                telemetry_data["left_elbow"].append(le)
-                telemetry_data["right_elbow"].append(re)
-                telemetry_data["left_knee"].append(lk)
-                telemetry_data["right_knee"].append(rk)
-                telemetry_data["left_hip"].append(lh)
-                telemetry_data["right_hip"].append(rh)
-                telemetry_data["movement_speed"].append(float((l_hip[0] + r_hip[0]) / 2.0))
+                telemetry_data["left_elbow"].append(le_ang)
+                telemetry_data["right_elbow"].append(re_ang)
+                telemetry_data["left_knee"].append(lk_ang)
+                telemetry_data["right_knee"].append(rk_ang)
+                telemetry_data["left_hip"].append(calculate_angle(ls, lh, lk))
+                telemetry_data["right_hip"].append(calculate_angle(rs, rh, rk))
                 
-                # Render tracking lines
+                # Draw simple tracking skeleton
                 mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
                 
             out.write(frame)
             progress_bar.progress(int((frame_idx / total_frames) * 100))
-            status_text.text(f"Processing video framework: Frame {frame_idx}/{total_frames}")
+            status_text.text(f"Reading tracking data: {frame_idx}/{total_frames} frames...")
 
         cap.release()
         out.release()
         pose.close()
         
+        # Verify data exists to prevent code crashes
         if not telemetry_data["left_elbow"]:
             status_text.empty()
             progress_bar.empty()
-            st.error("❌ No player detected in the video frames. Make sure the full body is visible.")
+            st.error("❌ **Tracking Failure:** Could not find a clear human body shape in the video. Please verify lighting and try again.")
         else:
-            status_text.text("🎬 Converting video for web playback...")
+            status_text.text("🧠 AI is identifying the movement and building scorecard...")
             
-            # CRITICAL FIX: Use ffmpeg to convert video format to H.264 so it's not a 0-second broken file
-            if os.path.exists(final_web_path):
-                os.remove(final_web_path)
-            os.system(f"ffmpeg -y -i {raw_output_path} -vcodec libx264 -pix_fmt yuv420p {final_web_path}")
+            # Pack statistical limits
+            def get_stats(arr): return {"min": int(np.min(arr)), "max": int(np.max(arr))}
             
-            # Build data packet
-            def get_stats(arr):
-                return {"min_deg": int(np.min(arr)), "max_deg": int(np.max(arr))}
-                
-            summary_metrics = {
-                "discipline": analysis_mode,
-                "left_elbow": get_stats(telemetry_data["left_elbow"]),
-                "right_elbow": get_stats(telemetry_data["right_elbow"]),
-                "left_knee": get_stats(telemetry_data["left_knee"]),
-                "right_knee": get_stats(telemetry_data["right_knee"])
+            payload = {
+                "user_selected_track": analysis_mode,
+                "data_points": {
+                    "left_elbow": get_stats(telemetry_data["left_elbow"]),
+                    "right_elbow": get_stats(telemetry_data["right_elbow"]),
+                    "left_knee": get_stats(telemetry_data["left_knee"]),
+                    "right_knee": get_stats(telemetry_data["right_knee"]),
+                    "left_hip": get_stats(telemetry_data["left_hip"]),
+                    "right_hip": get_stats(telemetry_data["right_hip"])
+                }
             }
             
-            # Simple, plain layout instructions for the AI
-            system_instruction = f"""
-            You are an elite sports science cricket coach. Review this tracking data:
-            {json.dumps(summary_metrics, indent=2)}
+            # STRICT, SIMPLIFIED PROMPT FOR CLEAN DISPLAY
+            simple_instruction = f"""
+            You are an expert cricket performance coach. Review the video context tracking payload here:
+            {json.dumps(payload, indent=2)}
 
-            Write a short, highly simplified bullet-point report. Avoid long essays. 
-            Use exactly these headings and provide clear, simple feedback under each:
+            Your task is to provide a short, clean, and punchy evaluation scorecard. 
+            Do NOT write long paragraphs. Keep descriptions short, using simple, clear words.
 
-            ### 🎯 Key Points
-            (List 2 simple observations about the movement speed or joint extensions)
+            Format your exact response using these specific headers:
+            
+            🎯 **ACTION IDENTIFIED**
+            [Look at the upper/lower body data distributions under the '{analysis_mode}' track and state the exact specific movement, shot played, or delivery type you deduce from the physics data].
 
-            ### ❌ Mistakes
-            (Identify 1 or 2 specific technical faults shown by the minimum or maximum angles)
+            💪 **MAIN STRENGTHS**
+            - [Bullet point showing what went well according to the numbers]
 
-            ### 💪 Strengths
-            (Identify what part of the posture or leg bend looks solid)
+            ⚠️ **KEY MISTAKES**
+            - [Bullet point flagging technical errors found in the range of motion]
 
-            ### 🌱 Wellness & Safety
-            (Provide a quick tip on body alignment to avoid injury or strain)
+            ⚙️ **BODY MECHANISM RATING**
+            - [Explain simply what the elbow and knee extensions show about their body shape during execution]
 
-            ### 🦴 Body Mechanics Score
-            (Give a quick 1-sentence wrap-up of their body mechanics)
+            🛠️ **SIMPLE TRAINING DRILL**
+            - [Provide exactly one short 2-sentence drill to fix the biggest mistake noted]
             """
             
-            status_text.text("🧠 Generating your simple coaching card...")
             try:
                 model = genai.GenerativeModel('gemini-3.5-flash')
-                response = model.generate_content(system_instruction)
+                response = model.generate_content(simple_instruction)
                 
                 status_text.empty()
                 progress_bar.empty()
-                st.success("✅ Analysis Completed!")
+                st.success("✅ Analysis Complete!")
                 
-                # Display Layout
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.subheader("📹 AI Telemetry Stream")
-                    st.video(final_web_path) # Will play smoothly now!
+                    st.subheader("📊 Tracked Telemetry Video")
+                    # Will now load seamlessly in web view without the 0-second glitch
+                    st.video(output_path)
                 with col2:
-                    st.subheader("📊 Performance Scorecard")
+                    st.subheader("📋 Simple Coaching Scorecard")
                     st.markdown(response.text)
                     
             except Exception as e:
-                st.error(f"AI Connection Error: {e}")
+                st.error(f"❌ Gemini Error: {e}")
 else:
-    st.info("💡 Open the sidebar panel, insert your Gemini API Key, and upload your movement video to begin processing.")
+    st.info("💡 Open the sidebar, insert your Gemini API Key, select your track, and upload a video clip to begin.")
