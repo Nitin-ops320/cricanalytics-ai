@@ -81,7 +81,7 @@ if uploaded_file and user_api_key:
                 mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
                 cv2.putText(frame, f"{e_angle} Deg", (int(l_elbow[0]*width)+15, int(l_elbow[1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
                 cv2.putText(frame, f"{k_angle} Deg", (int(l_knee[0]*width)+15, int(l_knee[1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-                
+          
             out.write(frame)
             progress_bar.progress(int((frame_idx / total_frames) * 100))
             status_text.text(f"Processing frame {frame_idx}/{total_frames}...")
@@ -91,18 +91,50 @@ if uploaded_file and user_api_key:
         pose.close()
         
         # Build Summary JSON
-        coaching_flags = []
-        min_elbow, min_knee = min(elbow_angles), min(knee_angles)
-        if min_elbow < 110: coaching_flags.append("Collapsed Front Elbow: Loss of control/power.")
-        else: coaching_flags.append("Good High Elbow stable position.")
-        if min_knee > 145: coaching_flags.append("Stiff Front Leg: Insufficient weight transfer.")
-        else: coaching_flags.append("Solid Front-Foot Stride.")
+         cap.release()
+        out.release()
+        pose.close()
         
-        session_json = {
-            "metrics_summary": {"elbow_min": min_elbow, "knee_min": min_knee},
-            "technical_coaching_insights": coaching_flags
-        }
-        
+        # FIX: Check if we actually collected any data before running min()
+        if not elbow_angles or not knee_angles:
+            status_text.empty()
+            progress_bar.empty()
+            st.error("❌ **Biomechanical Tracking Failed:** MediaPipe could not detect a distinct human pose in this video. Please ensure the player's full body is visible, well-lit, and facing the camera sidebar profile.")
+        else:
+            # Build Summary JSON safely now that lists are verified
+            coaching_flags = []
+            min_elbow, min_knee = min(elbow_angles), min(knee_angles)
+            
+            if min_elbow < 110: 
+                coaching_flags.append("Collapsed Front Elbow: Loss of control/power.")
+            else: 
+                coaching_flags.append("Good High Elbow stable position.")
+                
+            if min_knee > 145: 
+                coaching_flags.append("Stiff Front Leg: Insufficient weight transfer.")
+            else: 
+                coaching_flags.append("Solid Front-Foot Stride.")
+            
+            session_json = {
+                "metrics_summary": {"elbow_min": min_elbow, "knee_min": min_knee},
+                "technical_coaching_insights": coaching_flags
+            }
+            
+            # Generate LLM Feedback
+            status_text.text("🤖 Generating Professional AI Coaching Analysis...")
+            prompt = f"You are an elite cricket coach. Review this tracking data and write an action-oriented coaching report with 1 technical breakdown and 1 specific drill:\n{json.dumps(session_json)}"
+            model = genai.GenerativeModel('gemini-3.5-flash')
+            response = model.generate_content(prompt)
+            
+            # Render Results to dashboard splits
+            status_text.text("✅ Analysis Complete!")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("📊 Tracked Telemetry Video")
+                st.video(output_path)
+            with col2:
+                st.subheader("📋 Official AI Coaching Report")
+                st.write(response.text)
         # Generate LLM Feedback
         status_text.text("🤖 Generating Professional AI Coaching Analysis...")
         prompt = f"You are an elite cricket coach. Review this tracking data and write an action-oriented coaching report with 1 technical breakdown and 1 specific drill:\n{json.dumps(session_json)}"
