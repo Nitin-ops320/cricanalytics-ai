@@ -7,7 +7,7 @@ import json
 import google.generativeai as genai
 import os
 
-# Safe vector angle calculator (2D Projection)
+# Safe vector angle calculator
 def calculate_angle(a, b, c):
     a, b, c = np.array(a), np.array(b), np.array(c)
     ba = a - b
@@ -15,56 +15,55 @@ def calculate_angle(a, b, c):
     cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
     return int(np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0))))
 
-# Page Layout configuration
-st.set_page_config(page_title="CricAnalytics AI - Pro Engine", layout="wide", initial_sidebar_state="expanded")
-st.title("🏏 CricAnalytics AI: Universal Movement Performance Engine")
-st.markdown("Advanced computer vision and generative biomechanical analysis scaling across all cricket motions.")
+# Streamlit Page Design
+st.set_page_config(page_title="CricAnalytics AI", layout="wide")
+st.title("🏏 CricAnalytics AI: Universal Cricket Analyzer")
+st.markdown("Upload any cricket movement (Batting, Bowling, or Fielding) for an instant biomechanical check.")
 
-# Sidebar System Configuration
-st.sidebar.header("⚙️ Core Configuration")
-user_api_key = st.sidebar.text_input("Gemini API Key", type="password")
-analysis_mode = st.sidebar.selectbox("Select Analysis Discipline", [
-    "Batting Biomechanics & Shot Mechanics",
-    "Bowling Action, Release & Stride Dynamics",
-    "Fielding, Catching, Throwing & Agility"
+# Sidebar Controls
+st.sidebar.header("📋 Setup Panel")
+user_api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
+analysis_mode = st.sidebar.selectbox("Select Discipline", [
+    "Batting Performance",
+    "Bowling Action",
+    "Fielding & Agility"
 ])
-uploaded_file = st.sidebar.file_uploader("Upload Session Video Clip", type=['mp4', 'mov', 'avi', 'mkv'])
+uploaded_file = st.sidebar.file_uploader("Upload Cricket Clip", type=['mp4', 'mov', 'avi', 'mkv'])
 
 if uploaded_file and user_api_key:
     genai.configure(api_key=user_api_key)
     
-    # Clean staging setup for processing
+    # Define file paths
     input_path = "temp_input.mp4"
-    output_path = "telemetry_output.mp4"
+    raw_output_path = "raw_output.mp4"
+    final_web_path = "telemetry_output.mp4"
+    
     with open(input_path, "wb") as f:
         f.write(uploaded_file.read())
         
-    if st.sidebar.button("🚀 Execute Biomechanical Pipeline"):
+    if st.sidebar.button("🚀 Analyze Movement"):
         cap = cv2.VideoCapture(input_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        # Guard against zero/broken video values
         if total_frames <= 0 or fps <= 0:
-            st.error("❌ Invalid or corrupted video file format. Try uploading a different clip.")
+            st.error("❌ Unreadable video file. Please try another clip.")
             st.stop()
             
-        out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+        # Write to a temporary raw file first
+        out = cv2.VideoWriter(raw_output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
         
-        # Init Tracking Architecture
         mp_pose = mp.solutions.pose
-        pose = mp_pose.Pose(static_image_mode=False, model_complexity=1, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        pose = mp_pose.Pose(static_image_mode=False, model_complexity=1)
         mp_drawing = mp.solutions.drawing_utils
         
-        # Full-body universal telemetry arrays
         telemetry_data = {
             "left_elbow": [], "right_elbow": [],
-            "left_shoulder": [], "right_shoulder": [],
             "left_knee": [], "right_knee": [],
             "left_hip": [], "right_hip": [],
-            "center_mass_displacement": [] # Tracking global movement velocity
+            "movement_speed": []
         }
         
         progress_bar = st.progress(0)
@@ -82,129 +81,115 @@ if uploaded_file and user_api_key:
             if results.pose_landmarks:
                 landmarks = results.pose_landmarks.landmark
                 
-                # Extract positional mappings
-                def get_pt(idx): return [landmarks[idx].x, landmarks[idx].y]
+                # Get points
+                l_shoulder = [landmarks[11].x, landmarks[11].y]
+                l_elbow    = [landmarks[13].x, landmarks[13].y]
+                l_wrist    = [landmarks[15].x, landmarks[15].y]
+                l_hip      = [landmarks[23].x, landmarks[23].y]
+                l_knee     = [landmarks[25].x, landmarks[25].y]
+                l_ankle    = [landmarks[27].x, landmarks[27].y]
                 
-                # Joint extraction mappings (MediaPipe indices)
-                p = {
-                    "ls": get_pt(11), "le": get_pt(13), "lw": get_pt(15),
-                    "rs": get_pt(12), "re": get_pt(14), "rw": get_pt(16),
-                    "lh": get_pt(23), "lk": get_pt(25), "la": get_pt(27),
-                    "rh": get_pt(24), "rk": get_pt(26), "ra": get_pt(28)
-                }
+                r_shoulder = [landmarks[12].x, landmarks[12].y]
+                r_elbow    = [landmarks[14].x, landmarks[14].y]
+                r_wrist    = [landmarks[16].x, landmarks[16].y]
+                r_hip      = [landmarks[24].x, landmarks[24].y]
+                r_knee     = [landmarks[26].x, landmarks[26].y]
+                r_ankle    = [landmarks[28].x, landmarks[28].y]
                 
-                # Calculate all structural kinematics
-                ang = {
-                    "le": calculate_angle(p["ls"], p["le"], p["lw"]),
-                    "re": calculate_angle(p["rs"], p["re"], p["rw"]),
-                    "ls": calculate_angle(p["lh"], p["ls"], p["le"]),
-                    "rs": calculate_angle(p["rh"], p["rs"], p["re"]),
-                    "lk": calculate_angle(p["lh"], p["lk"], p["la"]),
-                    "rk": calculate_angle(p["rh"], p["rk"], p["ra"]),
-                    "lh": calculate_angle(p["ls"], p["lh"], p["lk"]),
-                    "rh": calculate_angle(p["rs"], p["rh"], p["rk"])
-                }
+                # Calculate angles
+                le = calculate_angle(l_shoulder, l_elbow, l_wrist)
+                re = calculate_angle(r_shoulder, r_elbow, r_wrist)
+                lk = calculate_angle(l_hip, l_knee, l_ankle)
+                rk = calculate_angle(r_hip, r_knee, r_ankle)
+                lh = calculate_angle(l_shoulder, l_hip, l_knee)
+                rh = calculate_angle(r_shoulder, r_hip, r_knee)
                 
-                # Append to datasets
-                telemetry_data["left_elbow"].append(ang["le"])
-                telemetry_data["right_elbow"].append(ang["re"])
-                telemetry_data["left_shoulder"].append(ang["ls"])
-                telemetry_data["right_shoulder"].append(ang["rs"])
-                telemetry_data["left_knee"].append(ang["lk"])
-                telemetry_data["right_knee"].append(ang["rk"])
-                telemetry_data["left_hip"].append(ang["lh"])
-                telemetry_data["right_hip"].append(ang["rh"])
+                telemetry_data["left_elbow"].append(le)
+                telemetry_data["right_elbow"].append(re)
+                telemetry_data["left_knee"].append(lk)
+                telemetry_data["right_knee"].append(rk)
+                telemetry_data["left_hip"].append(lh)
+                telemetry_data["right_hip"].append(rh)
+                telemetry_data["movement_speed"].append(float((l_hip[0] + r_hip[0]) / 2.0))
                 
-                # Track position of midpoint hip to compute translational velocity vectors
-                mid_hip_x = (p["lh"][0] + p["rh"][0]) / 2.0
-                telemetry_data["center_mass_displacement"].append(float(mid_hip_x))
-                
-                # Render complete overlay graphics
+                # Render tracking lines
                 mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
                 
-                # Draw minimal key contextual telemetry text onto screen graphics
-                cv2.putText(frame, f"L_Elbow: {ang['le']}deg", (int(p['le'][0]*width)+10, int(p['le'][1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1)
-                cv2.putText(frame, f"R_Elbow: {ang['re']}deg", (int(p['re'][0]*width)+10, int(p['re'][1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1)
-                cv2.putText(frame, f"L_Knee: {ang['lk']}deg", (int(p['lk'][0]*width)+10, int(p['lk'][1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,255,255), 1)
-                cv2.putText(frame, f"R_Knee: {ang['rk']}deg", (int(p['rk'][0]*width)+10, int(p['rk'][1]*height)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,255,255), 1)
-
             out.write(frame)
             progress_bar.progress(int((frame_idx / total_frames) * 100))
-            status_text.text(f"Processing motion telemetry frame {frame_idx}/{total_frames}...")
+            status_text.text(f"Processing video framework: Frame {frame_idx}/{total_frames}")
 
         cap.release()
         out.release()
         pose.close()
         
-        # Robust evaluation check to completely prevent ValueError on empty datasets
         if not telemetry_data["left_elbow"]:
             status_text.empty()
             progress_bar.empty()
-            st.error("❌ **Kinematic Tracking Error:** The software could not reliably isolate human skeletal metrics from this video. Ensure background clarity and clear full-body visibility.")
+            st.error("❌ No player detected in the video frames. Make sure the full body is visible.")
         else:
-            status_text.text("🤖 Constructing Unified Kinematic Payload...")
+            status_text.text("🎬 Converting video for web playback...")
             
-            # Formulate structured summary dataset metrics mapping max, min, ranges
-            def compile_stats(arr):
-                return {"min": int(np.min(arr)), "max": int(np.max(arr)), "range": int(np.max(arr) - np.min(arr))}
+            # CRITICAL FIX: Use ffmpeg to convert video format to H.264 so it's not a 0-second broken file
+            if os.path.exists(final_web_path):
+                os.remove(final_web_path)
+            os.system(f"ffmpeg -y -i {raw_output_path} -vcodec libx264 -pix_fmt yuv420p {final_web_path}")
+            
+            # Build data packet
+            def get_stats(arr):
+                return {"min_deg": int(np.min(arr)), "max_deg": int(np.max(arr))}
                 
-            packaged_payload = {
-                "discipline_context": analysis_mode,
-                "kinematic_metrics": {
-                    "upper_body_joints": {
-                        "left_elbow": compile_stats(telemetry_data["left_elbow"]),
-                        "right_elbow": compile_stats(telemetry_data["right_elbow"]),
-                        "left_shoulder": compile_stats(telemetry_data["left_shoulder"]),
-                        "right_shoulder": compile_stats(telemetry_data["right_shoulder"])
-                    },
-                    "lower_body_joints": {
-                        "left_knee": compile_stats(telemetry_data["left_knee"]),
-                        "right_knee": compile_stats(telemetry_data["right_knee"]),
-                        "left_hip": compile_stats(telemetry_data["left_hip"]),
-                        "right_hip": compile_stats(telemetry_data["right_hip"])
-                    }
-                },
-                "locomotive_dynamics": {
-                    "total_frames_processed": frame_idx,
-                    "horizontal_displacement_range": float(np.max(telemetry_data["center_mass_displacement"]) - np.min(telemetry_data["center_mass_displacement"]))
-                }
+            summary_metrics = {
+                "discipline": analysis_mode,
+                "left_elbow": get_stats(telemetry_data["left_elbow"]),
+                "right_elbow": get_stats(telemetry_data["right_elbow"]),
+                "left_knee": get_stats(telemetry_data["left_knee"]),
+                "right_knee": get_stats(telemetry_data["right_knee"])
             }
             
-            # Orchestrate specialized targeted system prompt logic based on disciplinary track
+            # Simple, plain layout instructions for the AI
             system_instruction = f"""
-            You are a world-class high-performance cricket sports scientist and national team bio-mechanics coach. 
-            You are analyzing the kinematic tracking output of a movement sequence categorized under the discipline: "{analysis_mode}".
+            You are an elite sports science cricket coach. Review this tracking data:
+            {json.dumps(summary_metrics, indent=2)}
 
-            Review the raw physical data metrics compiled below:
-            {json.dumps(packaged_payload, indent=2)}
+            Write a short, highly simplified bullet-point report. Avoid long essays. 
+            Use exactly these headings and provide clear, simple feedback under each:
 
-            Provide a comprehensive, elite coaching report. Your analysis must adapt to whatever action is in the video based on the data:
-            1. If it's batting, interpret what the data indicates about their posture, backlift, stance, or extension.
-            2. If it's bowling, evaluate what the joint ranges mean for their loading, alignment, and follow-through.
-            3. If it's fielding, interpret what the displacement and flexibility angles suggest about their speed, throwing mechanics, or core agility.
+            ### 🎯 Key Points
+            (List 2 simple observations about the movement speed or joint extensions)
 
-            Structure your report cleanly with sections for: Technical Biomechanical Evaluation, Core Vulnerabilities/Strengths Identified, and 1 Specialized Elite Training Drill. 
-            Maintain professional, actionable sports terminology. Do not output any markdown code blocks, system strings, or raw script syntax.
+            ### ❌ Mistakes
+            (Identify 1 or 2 specific technical faults shown by the minimum or maximum angles)
+
+            ### 💪 Strengths
+            (Identify what part of the posture or leg bend looks solid)
+
+            ### 🌱 Wellness & Safety
+            (Provide a quick tip on body alignment to avoid injury or strain)
+
+            ### 🦴 Body Mechanics Score
+            (Give a quick 1-sentence wrap-up of their body mechanics)
             """
             
-            status_text.text("🧠 Deploying Generative Large Language Model Evaluation Layer...")
+            status_text.text("🧠 Generating your simple coaching card...")
             try:
                 model = genai.GenerativeModel('gemini-3.5-flash')
                 response = model.generate_content(system_instruction)
                 
                 status_text.empty()
                 progress_bar.empty()
-                st.success("✅ Analysis Successfully Concluded!")
+                st.success("✅ Analysis Completed!")
                 
+                # Display Layout
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.subheader("📊 CV Overlaid Telemetry Output")
-                    st.video(output_path)
+                    st.subheader("📹 AI Telemetry Stream")
+                    st.video(final_web_path) # Will play smoothly now!
                 with col2:
-                    st.subheader("📋 Professional Biomechanical Analysis")
-                    st.write(response.text)
+                    st.subheader("📊 Performance Scorecard")
+                    st.markdown(response.text)
                     
             except Exception as e:
-                st.error(f"❌ Verification Layer Error: Unable to extract data from Gemini API. Details: {e}")
+                st.error(f"AI Connection Error: {e}")
 else:
-    st.info("💡 Configuration Status: Open the sidebar, insert your Gemini API Key, select your target cricket discipline, and upload your movement video to initialize processing.")
+    st.info("💡 Open the sidebar panel, insert your Gemini API Key, and upload your movement video to begin processing.")
