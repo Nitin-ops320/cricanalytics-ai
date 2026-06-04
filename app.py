@@ -6,41 +6,50 @@ import json
 import google.generativeai as genai
 import tensorflow as tf
 import os
+import subprocess
 
-st.set_page_config(page_title="CricAnalytics AI - Frame Analysis", layout="wide")
-st.title("🏏 CricAnalytics AI: Biomechanical Mistake Highlight Engine")
+# Page Configuration Setup
+st.set_page_config(page_title="CricAnalytics AI - Deep Learning", layout="wide")
+st.title(" 🏏 CricAnalytics AI: Visual Mistake Tracking Engine")
 
 user_api_key = st.sidebar.text_input("Gemini API Key", type="password")
 uploaded_file = st.sidebar.file_uploader("Upload Cricket Clip", type=['mp4', 'mov', 'avi'])
 
+# Check for our Deep Learning Model file in GitHub environment
 dl_model_path = 'cricket_dl_model.keras'
 if not os.path.exists(dl_model_path):
     st.error(f"❌ Core Component Missing: Ensure '{dl_model_path}' is committed into your GitHub repo.")
     st.stop()
 
+# Load the compiled Deep Learning model
 dl_network = tf.keras.models.load_model(dl_model_path)
 
 if uploaded_file and user_api_key:
     genai.configure(api_key=user_api_key)
     
     input_path = "temp_input.mp4"
+    raw_output_path = "raw_telemetry_output.mp4"
+    browser_output_path = "browser_compatible_output.mp4"
+    
     with open(input_path, "wb") as f:
         f.write(uploaded_file.read())
         
-    if st.sidebar.button("🚀 Analyze Player Movements"):
+    if st.sidebar.button("🚀 Execute Visual Diagnostics"):
         cap = cv2.VideoCapture(input_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
+        # Write temporary raw video file first
+        out = cv2.VideoWriter(raw_output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+        
         mp_pose = mp.solutions.pose
         pose = mp_pose.Pose(static_image_mode=False, model_complexity=1)
+        mp_drawing = mp.solutions.drawing_utils
         
         frame_window_sequence = []
-        full_video_telemetry = []
-        
-        # Array list to store images of mistakes we find
-        detected_mistakes_gallery = []
+        full_video_telemetry = [] 
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -62,13 +71,7 @@ if uploaded_file and user_api_key:
             
             if results.pose_landmarks:
                 landmarks = results.pose_landmarks.landmark
-                
-                # Helper to get normalized coordinates
                 def get_pt(idx): return [landmarks[idx].x, landmarks[idx].y]
-                
-                # Convert normalized coordinates to actual frame pixels for drawing circles
-                def get_pixel_coords(idx): 
-                    return int(landmarks[idx].x * width), int(landmarks[idx].y * height)
                 
                 ls, le, lw = get_pt(11), get_pt(13), get_pt(15)
                 rs, re, rw = get_pt(12), get_pt(14), get_pt(16)
@@ -88,47 +91,46 @@ if uploaded_file and user_api_key:
                     
                 full_video_telemetry.append(current_frame_features)
                 
-                # --- BIOMECHANICAL MISTAKE DETECTION RULES ---
-                # Rule 1: Bowling Arm/Wrist Drop (If wrist falls below shoulder baseline too early)
-                if rw[1] > rs[1] and len(detected_mistakes_gallery) < 3:
-                    # Create a clean copy of the frame to draw on
-                    annotated_frame = frame.copy()
-                    pixel_x, pixel_y = get_pixel_coords(16) # Right Wrist index
-                    
-                    # Draw a bright red circle on the right wrist mistake area
-                    cv2.circle(annotated_frame, (pixel_x, pixel_y), 25, (0, 0, 255), 4)
-                    
-                    # Save the frame image array and context
-                    detected_mistakes_gallery.append({
-                        "type": "Wrist Drop Error",
-                        "frame_rgb": cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB),
-                        "description": f"At frame {frame_idx}, the bowler's wrist dropped lower than the shoulder plane prematurely, destroying rotation leverage."
-                    })
+                # --- VISUAL MISTAKE DETECTOR LAYER (DYNAMIC CIRCLING) ---
+                # Rule 1: Grounded shots (hands low) require a deep knee bend. If straight knee (>140 deg), circle it.
+                if lw[1] > ls[1] and lk_ang > 140:
+                    cx, cy = int(landmarks[25].x * width), int(landmarks[25].y * height)
+                    cv2.circle(frame, (cx, cy), 35, (0, 0, 255), 4) # Bright Red Circle around Left Knee
+                    cv2.putText(frame, "MISTAKE: BEND KNEE", (cx + 40, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 
-                # Rule 2: Unbent Front Knee during Drive (Knee angle too straight)
-                if lk_ang > 150 and len(detected_mistakes_gallery) < 3:
-                    annotated_frame = frame.copy()
-                    pixel_x, pixel_y = get_pixel_coords(25) # Left Knee index
-                    
-                    # Draw a bright yellow circle on the knee mistake area
-                    cv2.circle(annotated_frame, (pixel_x, pixel_y), 25, (0, 255, 255), 4)
-                    
-                    detected_mistakes_gallery.append({
-                        "type": "Poor Knee Flexion",
-                        "frame_rgb": cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB),
-                        "description": f"At frame {frame_idx}, the batsman's front knee flexed at {lk_ang}°. The leg is too straight, restricting forward body weight transfer."
-                    })
-                    
+                # Rule 2: High power shots (hands high) require full arm extension. If arms are cramped (<130 deg), circle it.
+                if lw[1] < ls[1] and le_ang < 130:
+                    cx, cy = int(landmarks[13].x * width), int(landmarks[13].y * height)
+                    cv2.circle(frame, (cx, cy), 35, (0, 0, 255), 4) # Bright Red Circle around Left Elbow
+                    cv2.putText(frame, "MISTAKE: EXTEND ARMS", (cx + 40, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+                # Draw regular skeleton tracking lines on top
+                mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+                
+            out.write(frame)
             progress_bar.progress(int((frame_idx / total_frames) * 100))
-            status_text.text(f"Scanning frame sequences: {frame_idx}/{total_frames}...")
+            status_text.text(f"Analyzing mechanics and painting frames: {frame_idx}/{total_frames}...")
 
         cap.release()
+        out.release()
         pose.close()
         
         if len(frame_window_sequence) < 30:
-            st.error("❌ Video sequence too short to process.")
+            st.error("❌ Video duration too brief to fulfill deep learning timeline criteria.")
         else:
-            status_text.text("🧠 Calculating Deep Learning Motion Metrics...")
+            # --- FIX FOR 0-SECOND VIDEO: RE-ENCODE WITH FFMPEG FOR BROWSER PLAYBACK ---
+            status_text.text("🎬 Optimizing video codec for web browsers (Converting to H.264)...")
+            try:
+                # Run an OS system call converting the video to browser-native H.264
+                subprocess.call([
+                    'ffmpeg', '-y', '-i', raw_output_path,
+                    '-vcodec', 'libx264', '-pix_fmt', 'yuv420p', '-f', 'mp4', browser_output_path
+                ])
+            except Exception as e:
+                st.warning(f"FFmpeg compression encoder bypassed: {e}")
+                browser_output_path = raw_output_path
+
+            status_text.text("🧠 Evaluating sequence structure with LSTM network...")
             input_tensor = np.array([frame_window_sequence])
             predictions = dl_network.predict(input_tensor)[0]
             class_idx = np.argmax(predictions)
@@ -136,28 +138,41 @@ if uploaded_file and user_api_key:
             classes_map = {0: "Grounded Cover Drive", 1: "Lofted Power Hit (Six)", 2: "Fast Bowling Action"}
             predicted_action_label = classes_map.get(class_idx, "Unknown Shot Type")
             
-            status_text.text("✍️ Assembling Visual Bio-Report...")
+            status_text.text("✍️ Writing tactical coaching report...")
             all_metrics = np.array(full_video_telemetry)
-            
             payload = {
                 "deep_learning_verified_shot": predicted_action_label,
                 "confidence_score": float(np.max(predictions)),
                 "movement_time_series_summary": {
                     "minimum_front_knee_flexion": int(np.min(all_metrics[:, 2])),
-                    "maximum_arm_extension_reach": int(np.max(all_metrics[:, 1]))
+                    "maximum_arm_extension_reach": int(np.max(all_metrics[:, 1])),
+                    "net_hand_vertical_lift": float(np.min(all_metrics[:, 4]) - np.mean(all_metrics[:, 5]))
                 }
             }
             
             targeted_prompt = f"""
-            You are an elite sports science cricket coach. Review this telemetry payload:
+            You are a senior computer vision engineer and world-class high-performance cricket coach.
+            Review this telemetry analysis payload generated from our Deep Learning system:
             {json.dumps(payload, indent=2)}
+
+            Our custom LSTM Network verified with high confidence that the shot being played is a: "{predicted_action_label}".
             
-            The system verified the movement as a: {predicted_action_label}.
-            Provide a short summary detailing what movement errors occurred based on these metrics. 
-            Keep it strictly using these bold headers:
-            🎯 **SHOT PLAYED**
-            ⚠️ **THE ACTUAL MOVEMENT PROBLEM**
+            Deliver a movement-based problem analysis scorecard using simple words and short bullet points. 
+            Do NOT output code-based variables, write a code analysis, or include long text blocks.
+
+            Structure your reply using these exact bold Markdown headers:
+
+            🎯 **SHOT PLAYED BY PLAYER**
+            {predicted_action_label} (Verified via Sequence Analysis)
+
+            ⚠️ **THE ACTUAL MOVEMENT PROBLEM MARKED IN RED**
+            - [Explain exactly what the red circles on their joints indicate. For example: if it circled their knee, explain that their weight transfers late because the front leg remains completely vertical.]
+
+            ⚙️ **BODY TIMELINE MOVEMENT EVALUATION**
+            - [Explain simply what went wrong with their body extension during the full video timeline sequence]
+
             🛠️ **MOVEMENT FIXING DRILL**
+            - [Provide exactly one short 2-sentence physical on-field drill to fix this specific tactical movement mistake]
             """
             
             try:
@@ -166,25 +181,19 @@ if uploaded_file and user_api_key:
                 
                 status_text.empty()
                 progress_bar.empty()
-                st.success("✅ Analysis Completed Automatically!")
+                st.success("✅ Architecture Executed Successfully!")
                 
-                # LAYOUT STRUCTURE
-                col1, col2 = st.columns([1, 1])
-                
-                with col1:
-                    st.subheader("📋 Core Biomechanical Assessment")
-                    st.markdown(response.text)
-                
+                col1, col2 = st.columns(2)
                 with col2:
-                    st.subheader("📸 Visual Keyframe Mistake Highlights")
-                    if not detected_mistakes_gallery:
-                        st.write("🌿 No major biomechanical threshold violations detected in this movement cycle.")
+                    st.subheader("📋 Targeted Biomechanical Scorecard")
+                    st.markdown(response.text)
+                    
+                with col1:
+                    st.subheader("📊 Pose Tracked & Highlighted Clip")
+                    if os.path.exists(browser_output_path) and os.path.getsize(browser_output_path) > 0:
+                        st.video(browser_output_path)
                     else:
-                        # Display each captured image mistake sequentially on the screen
-                        for item in detected_mistakes_gallery[:2]: # Show up to 2 distinct mistakes
-                            st.image(item["frame_rgb"], caption=item["type"], use_container_width=True)
-                            st.caption(f"🔍 **Technical Mistake Detailing:** {item['description']}")
-                            st.markdown("---")
-                            
+                        st.error("❌ Video file was not created successfully by the server container.")
+                    
             except Exception as e:
-                st.error(f"❌ AI Engine Error: {e}")
+                st.error(f"❌ AI Core Exception Error: {e}")
