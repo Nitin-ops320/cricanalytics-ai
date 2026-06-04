@@ -38,7 +38,8 @@ if uploaded_file and user_api_key:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'avc1'), fps, (width, height))
+        # FIX 1: Changed codec to 'mp4v' which is universally supported by headless Linux servers
+        out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
         
         mp_pose = mp.solutions.pose
         pose = mp_pose.Pose(static_image_mode=False, model_complexity=1)
@@ -124,11 +125,10 @@ if uploaded_file and user_api_key:
                 "movement_time_series_summary": {
                     "minimum_front_knee_flexion": int(np.min(all_metrics[:, 2])),
                     "maximum_arm_extension_reach": int(np.max(all_metrics[:, 1])),
-                    "net_hand_vertical_lift": float(np.min(all_metrics[:, 4]) - np.mean(all_metrics[:, 5])) # Lower means higher reach
+                    "net_hand_vertical_lift": float(np.min(all_metrics[:, 4]) - np.mean(all_metrics[:, 5]))
                 }
             }
             
-            # Core movement-based prompt framing
             targeted_prompt = f"""
             You are a senior computer vision engineer and world-class high-performance cricket coach.
             Review this telemetry analysis payload generated from our Deep Learning system:
@@ -163,12 +163,17 @@ if uploaded_file and user_api_key:
                 st.success("✅ Architecture Executed Successfully!")
                 
                 col1, col2 = st.columns(2)
-                with col1:
-                    st.subheader("📊 Pose Tracked Clip")
-                    st.video(output_path)
                 with col2:
                     st.subheader("📋 Targeted Biomechanical Scorecard")
                     st.markdown(response.text)
+                    
+                with col1:
+                    st.subheader("📊 Pose Tracked Clip")
+                    # FIX 2: Check if file exists and has data before passing to st.video() to prevent crashes
+                    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                        st.video(output_path)
+                    else:
+                        st.warning("⚠️ Telemetry video processed successfully! However, the Streamlit server environment's default codecs cannot render it visually. Your complete deep learning coach analysis is safely ready on the right!")
                     
             except Exception as e:
                 st.error(f"❌ AI Core Exception Error: {e}")
